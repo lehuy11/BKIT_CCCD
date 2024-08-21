@@ -1,3 +1,37 @@
 {
-    "cmake.sourceDirectory": "C:/Users/USER/Desktop/code/c++/ocr_paddle/PaddleOCR/deploy/cpp_infer"
+  "C_Cpp.intelliSenseEngine": "Tag Parser",
+  "files.associations": {
+    "gpio.h": "c",
+    "task.h": "c",
+    "freertos.h": "c",
+    "freertosconfig.h": "c",
+    "queue.h": "c"
+  },
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportOptionalMemberAccess": "none",
+    "reportOptionalIterable": "none",
+    "reportGeneralTypeIssues": "none",
+    "reportMissingImports": "none",
+    "reportAttributeAccessIssue": "none"
+  },
+  "python.linting.enabled": true,
+  "python.linting.pylintEnabled": true,
+  "python.linting.pyrightEnabled": true,
+  "python.linting.flake8Enabled": true,
+  "python.linting.mypyEnabled": true,
+
+  // Terminal configuration
+  "terminal.integrated.profiles.windows": {
+    "Command Prompt": {
+      "path": ["${env:windir}\\System32\\cmd.exe"]
+    },
+    "PowerShell": {
+      "path": ["${env:ProgramFiles}\\PowerShell\\7\\pwsh.exe"]
+    },
+    "Git Bash": {
+      "path": ["C:\\Program Files\\Git\\bin\\bash.exe"]
+    }
+  },
+  "terminal.integrated.defaultProfile.windows": "Command Prompt"
 }

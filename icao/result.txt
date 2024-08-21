@@ -1,9 +1,8 @@
-name: 1 D V N M20300031120662030003116
-birth: 20/11/03
-checksum: 3
-Sex: M
-expire: 20/11/28
-checksum: 2
-checksum: VNM
-checksum: 2
-name: N G U Y E N V A N D A T
+id: IDVNM
+cccdnumber1: 201000937
+checksum1: 4
+birth: 010529
+checksum3: 3
+expire: 260529
+checksum4: 2
+
