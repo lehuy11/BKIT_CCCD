@@ -20,6 +20,7 @@ class CCCDApp:
         self.root.title("ỨNG DỤNG ĐỌC CCCD GẮN CHÍP")
         self.root.geometry("1200x600")
         root.iconbitmap(r"icon/Icon_Emoji_Raiden_Shogun_4.ico")
+        root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # Connection management
         self.connection_frame = tk.LabelFrame(root, text="Quản lý kết nối", padx=10, pady=10)
@@ -321,19 +322,15 @@ class CCCDApp:
     def _send_combined_data_thread(self):
         if self.ser and self.ser.is_open:
             try:
-                # Read the JSON file
                 with open('icao/result.json', 'r') as file:
                     data = json.load(file)
 
-                # Extract and concatenate the required fields
-                cccdnumber1 = data[0]['cccdnumber1']
-                checksum1 = data[0]['checksum1']
-                birth = data[1]['birth']
-                checksum3 = data[1]['checksum3']
-                expire = data[1]['expire']
-                checksum4 = data[1]['checksum4']
-
-                combined_data = '!' + cccdnumber1 + checksum1 + birth + checksum3 + expire + checksum4 
+                combined_data = '!'
+                for entry in data:
+                    if 'cccdnumber1' in entry and 'checksum1' in entry:
+                        combined_data += entry['cccdnumber1'] + entry['checksum1']
+                    if 'birth' in entry and 'checksum3' in entry and 'expire' in entry and 'checksum4' in entry:
+                        combined_data += entry['birth'] + entry['checksum3'] + entry['expire'] + entry['checksum4']
 
                 # Send the combined data via serial
                 self.ser.write(combined_data.encode() + b'\r')
@@ -418,6 +415,31 @@ class CCCDApp:
             messagebox.showwarning("Warning", "Please select a form to export.")
         else:
             messagebox.showwarning("Warning", "Please select a form to export.")
+#=======================================================================================  
+    def clear_files(self):
+        # Xóa ảnh
+        image_paths = ['img/captured_image.png', 'img/avatar.jpg','icao/captured_image.png']
+        for image_path in image_paths:
+            if os.path.exists(image_path):
+                os.remove(image_path)
+        
+        # Xóa file JSON
+        json_path = 'icao/result.json'
+        if os.path.exists(json_path):
+            os.remove(json_path)
+        
+        # Xóa file text
+        text_path = 'icao/result.txt'
+        if os.path.exists(text_path):
+            os.remove(text_path)
+#=======================================================================================      
+    def on_closing(self):
+        # Gọi hàm dọn dẹp dữ liệu
+        self.clear_files()
+        
+        # Xác nhận đóng ứng dụng
+        if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
