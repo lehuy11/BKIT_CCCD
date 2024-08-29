@@ -12,6 +12,8 @@ import threading
 import time
 import binascii
 import io
+from component.automate_fill import fill
+
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 class CCCDApp:
@@ -97,10 +99,6 @@ class CCCDApp:
         self.check1 = tk.Checkbutton(self.selection_frame, text="Sơ yếu lý lịch", variable=self.check1_var)
         self.check1.grid(row=0, column=0, sticky="w")
 
-        self.check2_var = tk.BooleanVar()
-        self.check2 = tk.Checkbutton(self.selection_frame, text="Hồ sơ bệnh nhân", variable=self.check2_var)
-        self.check2.grid(row=1, column=0, sticky="w")
-
         self.export_button = tk.Button(self.selection_frame, text="Xuất biểu mẫu...", command=self.export_form, state=tk.DISABLED)
         self.export_button.grid(row=2, column=0, pady=5, sticky="w")
 
@@ -124,7 +122,6 @@ class CCCDApp:
         self.data_display_text = tk.Text(self.data_display_frame, height=10, width=30)
         self.data_display_text.grid(row=0, column=0)
         
-
         # Image path
         self.image_path = None
 
@@ -154,6 +151,7 @@ class CCCDApp:
             self.export_button.config(state="normal")
         else:
             self.export_button.config(state="disabled")
+
 #=======================================================================================
     def list_com_ports(self):
         ports = [port.device for port in serial.tools.list_ports.comports()]
@@ -176,6 +174,7 @@ class CCCDApp:
         while True:
             self.update_com_ports()
             time.sleep(1)  # Cập nhật mỗi 10 giây
+
 #=======================================================================================
     def open_connection_thread(self):
         thread = threading.Thread(target=self.open_connection)
@@ -187,16 +186,18 @@ class CCCDApp:
             messagebox.showwarning("Warning", "No COM ports available.")
             return
         try:
-            self.ser = serial.Serial(com_port, 921600)
+            self.ser = serial.Serial(com_port, 921600, timeout=1)
             time.sleep(2)
             self.connection_status_label.config(text="Connected", fg="red")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open connection: {e}")
-
+            self.ser = None
+    
     def close_connection(self):
         if self.ser and self.ser.is_open:
             self.ser.close()
             self.connection_status_label.config(text="Disconnected", fg="blue")
+
 #=======================================================================================    
     def update_camera_frame_thread(self):
         thread = threading.Thread(target=self.update_camera_frame)
@@ -286,32 +287,35 @@ class CCCDApp:
         image = ImageTk.PhotoImage(image)
         self.captured_image_label.config(image=image)
         self.captured_image_label.image = image
+
 #=======================================================================================
     def process_image_with_ocr_thread(self):
         """Run the process_image_with_ocr method in a separate thread."""
         thread = threading.Thread(target=self.process_image_with_ocr)
         thread.start()
-
+    
     def process_image_with_ocr(self):
         if self.image_path:
             try:
-                # Run the OCR script and capture the output
-                result = subprocess.run(['python', 'ocr_script.py', self.image_path], capture_output=True, text=True)
+                # Chỉ định đường dẫn chính xác đến ocr_script.py
+                script_path = os.path.join('component', 'ocr_script.py')
+                result = subprocess.run(['python', script_path, self.image_path], capture_output=True, text=True)
                 
-                # Check if there was an error running the script
+                # Kiểm tra lỗi từ script
                 if result.returncode != 0:
                     messagebox.showerror("Error", f"OCR script error: {result.stderr}")
                     return
                 
                 ocr_result = result.stdout
 
-                # Display the OCR result
+                # Hiển thị kết quả OCR
                 self.card_info_text.delete(1.0, tk.END)
                 self.card_info_text.insert(tk.END, ocr_result)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to process image with OCR: {e}")
         else:
             messagebox.showwarning("Warning", "No image to process")
+
 #=======================================================================================
     def send_combined_data(self):
         """Send combined data from JSON file to ESP32 in a separate thread."""
@@ -320,63 +324,83 @@ class CCCDApp:
         thread.start()
 
     def _send_combined_data_thread(self):
+        """Thread function to send combined data and handle response."""
         if self.ser and self.ser.is_open:
             try:
-                with open('icao/result.json', 'r') as file:
-                    data = json.load(file)
-
-                combined_data = '!'
-                for entry in data:
-                    if 'cccdnumber1' in entry and 'checksum1' in entry:
-                        combined_data += entry['cccdnumber1'] + entry['checksum1']
-                    if 'birth' in entry and 'checksum3' in entry and 'expire' in entry and 'checksum4' in entry:
-                        combined_data += entry['birth'] + entry['checksum3'] + entry['expire'] + entry['checksum4']
-
-                # Send the combined data via serial
-                self.ser.write(combined_data.encode() + b'\r')
-                self.data_display_text.insert(tk.END, f"Sent Combined Data: {combined_data}\n")
-
-                # Wait for the ESP32 to send back a JSON message
-                while True:
-                    while self.ser.in_waiting == 0:
-                        pass
-                    
-                    response = self.ser.readline()
-                    response = str(response, 'utf-8').strip('\r\n')
-                    # print(response)
-                    if response.startswith('@'):
-                    # Remove the '@' and process the remaining data
-                        data = response[1:].strip()
-                        data = data.replace(' ', '')
-                        data = data.replace('\n', '')
-                        data = binascii.a2b_hex(data)
-                        
-                        # Save the image data to a file
-                        with open('img/avatar.jpg', 'wb') as image_file:
-                            image_file.write(data)
-                        
-                        # Optionally, update the image display
-                        self.show_image()
-                    if response.startswith('{') and response.endswith('}'):
-                        try:
-                            # Parse the JSON response
-                            information = json.loads(response)
-                            self.update_personal_info(information)
-                            self.update_status("Success")
-                        except json.JSONDecodeError:
-                            messagebox.showerror("Error", "Failed to decode JSON.")
-                    elif response.startswith('@'):
-                        hex_data = response[1:]
-                    else:
-                        if response == "#OKE":
-                            self.update_status("Success")
-                        elif response == "#FAIL":
-                            self.update_status("Fail")
-                    self.data_display_text.insert(tk.END, f"Received: {response}\n")
+                combined_data = self.read_and_combine_data()
+                self.send_data(combined_data)
+                self.process_esp32_response()
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to send combined data: {e}")
         else:
             messagebox.showwarning("Warning", "Serial port is not open.")
+
+    def read_and_combine_data(self):
+        """Read data from JSON and combine it into a single string."""
+        with open('icao/result.json', 'r') as file:
+            data = json.load(file)
+
+        combined_data = '!'
+        for entry in data:
+            if 'cccdnumber1' in entry and 'checksum1' in entry:
+                combined_data += entry['cccdnumber1'] + entry['checksum1']
+            if 'birth' in entry and 'checksum3' in entry and 'expire' in entry and 'checksum4' in entry:
+                combined_data += entry['birth'] + entry['checksum3'] + entry['expire'] + entry['checksum4']
+        return combined_data
+
+    def send_data(self, combined_data):
+        """Send the combined data via serial connection."""
+        self.ser.write(combined_data.encode() + b'\r')
+        self.data_display_text.insert(tk.END, f"Sent Combined Data: {combined_data}\n")
+
+    def process_esp32_response(self):
+        """Process the response from ESP32."""
+        while True:
+            while self.ser.in_waiting == 0:
+                pass
+            
+            response = self.ser.readline()
+            response = str(response, 'utf-8').strip('\r\n')
+            
+            if response.startswith('@'):
+                self.handle_image_response(response)
+            elif response.startswith('{') and response.endswith('}'):
+                self.handle_json_response(response)
+            else:
+                self.handle_other_responses(response)
+            
+            self.data_display_text.insert(tk.END, f"Received: {response}\n")
+
+    def handle_image_response(self, response):
+        """Handle image data response."""
+        data = response[1:].strip()
+        data = data.replace(' ', '')
+        data = data.replace('\n', '')
+        data = binascii.a2b_hex(data)
+        
+        # Save the image data to a file
+        with open('img/avatar.jpg', 'wb') as image_file:
+            image_file.write(data)
+        
+        # Optionally, update the image display
+        self.show_image()
+
+    def handle_json_response(self, response):
+        """Handle JSON data response."""
+        try:
+            information = json.loads(response)
+            self.update_personal_info(information)
+            self.update_status("Success")
+        except json.JSONDecodeError:
+            messagebox.showerror("Error", "Failed to decode JSON.")
+
+    def handle_other_responses(self, response):
+        """Handle other types of responses."""
+        if response == "#OKE":
+            self.update_status("Success")
+        elif response == "#FAIL":
+            self.update_status("Fail")
+
 #=======================================================================================
     def update_personal_info(self, information):
         """Update personal info fields with data from JSON."""
@@ -390,6 +414,7 @@ class CCCDApp:
             if field in information:
                 self.entries[i].delete(0, tk.END)  # Clear existing text
                 self.entries[i].insert(0, information[field])  # Insert new text
+
 #=======================================================================================    
     def show_image(self):
         image_path = "img/avatar.jpg"  # Đường dẫn đến ảnh
@@ -400,21 +425,38 @@ class CCCDApp:
             self.image_label.image = photo
         else:
             messagebox.showwarning("Warning", "Ảnh không tồn tại.")
+
 #=======================================================================================    
     def export_form(self):
         if self.check1_var.get():
-            document = Document()
-            document.add_heading('Biểu mẫu', 0)
-            document.add_paragraph('Thông tin cá nhân')
-            for entry in self.entries:
-                document.add_paragraph(entry.get())
-            document_path = 'doc/syll.docx'
-            document.save(document_path)
-            messagebox.showinfo("Info", f"Form exported to {document_path}")
+            # Gather data from entries
+            data = {
+                "Họ và tên": self.entries[0].get(),
+                "Số CCCD": self.entries[1].get(),
+                "Ngày cấp": self.entries[2].get(),
+                "Ngày hết hạn": self.entries[3].get(),
+                "Ngày sinh": self.entries[4].get(),
+                "Giới tính": self.entries[5].get(),
+                "Quốc tịch": self.entries[6].get(),
+                "Dân tộc": self.entries[7].get(),
+                "Tôn giáo": self.entries[8].get(),
+                "Quê quán": self.entries[9].get(),
+                "Thường trú": self.entries[10].get(),
+                "Nhận dạng": self.entries[11].get(),
+                "Họ tên cha": self.entries[12].get(),
+                "Họ tên mẹ": self.entries[13].get()
+            }
+
+            template_path = 'doc/syll.docx'
+            output_path = 'doc/syll_filled.docx'
+            fill(template_path, output_path, data)
+            
+            messagebox.showinfo("Info", f"Form exported and converted to PDF at {output_path}")
         elif self.check2_var.get():
             messagebox.showwarning("Warning", "Please select a form to export.")
         else:
             messagebox.showwarning("Warning", "Please select a form to export.")
+
 #=======================================================================================  
     def clear_files(self):
         # Xóa ảnh
@@ -432,16 +474,36 @@ class CCCDApp:
         text_path = 'icao/result.txt'
         if os.path.exists(text_path):
             os.remove(text_path)
+
+        text_path = 'doc/syll_filled.docx'
+        if os.path.exists(text_path):
+            os.remove(text_path)
+
 #=======================================================================================      
     def on_closing(self):
-        # Gọi hàm dọn dẹp dữ liệu
-        self.clear_files()
-        
-        # Xác nhận đóng ứng dụng
+        # Hiển thị hộp thoại xác nhận thoát ứng dụng
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
+            # Gọi hàm dọn dẹp dữ liệu
+            self.clear_files()
+            
+            # Đóng kết nối serial nếu mở
+            self.close_connection()
+
+            # Giải phóng camera và đóng cửa sổ OpenCV nếu đang mở
+            if hasattr(self, 'video_source') and self.video_source.isOpened():
+                self.video_source.release()
+            cv2.destroyAllWindows()
+            
+            # Dừng các thread đang chạy nếu cần
+            if hasattr(self, 'update_com_ports_thread'):
+                self.update_com_ports_thread.join(timeout=1)  # Đợi thread dừng lại
+
+            # Xác nhận đóng ứng dụng
             self.root.destroy()
+
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = CCCDApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
