@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, Toplevel
 from PIL import Image, ImageTk, ImageFile
 import cv2
 import subprocess
@@ -86,7 +86,7 @@ class CCCDApp:
             
         # Image display frame
         self.image_frame = tk.LabelFrame(root, text="Ảnh CCCD", padx=10, pady=10)
-        self.image_frame.grid(row=2, column=1, padx=10, pady=10, rowspan=2, sticky="nw")
+        self.image_frame.grid(row=0, column=2, padx=10, pady=10, rowspan=2, sticky="nw")
 
         self.image_label = tk.Label(self.image_frame)
         self.image_label.grid(row=0, column=0)
@@ -103,11 +103,11 @@ class CCCDApp:
         self.export_button.grid(row=2, column=0, pady=5, sticky="w")
 
         # Card information
-        self.card_info_frame = tk.LabelFrame(root, text="Thông tin thẻ", padx=10, pady=10)
-        self.card_info_frame.grid(row=0, column=2, padx=10, pady=10, rowspan=3, sticky="nw")
+        # self.card_info_frame = tk.LabelFrame(root, text="Thông tin thẻ", padx=10, pady=10)
+        # self.card_info_frame.grid(row=2, column=1, padx=10, pady=10, rowspan=3, sticky="nw")
 
-        self.card_info_text = tk.Text(self.card_info_frame, height=20, width=30)
-        self.card_info_text.grid(row=0, column=0)
+        # self.card_info_text = tk.Text(self.card_info_frame, height=20, width=30)
+        # self.card_info_text.grid(row=0, column=0)
 
         # Captured image display frame
         self.captured_image_frame = tk.LabelFrame(root, text="Ảnh đã chụp", padx=10, pady=10)
@@ -116,11 +116,11 @@ class CCCDApp:
         self.captured_image_label = tk.Label(self.captured_image_frame)
         self.captured_image_label.grid(row=0, column=0)
 
-        self.data_display_frame = tk.LabelFrame(root, text="Kết quả truyền dữ liệu từ ESP32", padx=10, pady=10)
-        self.data_display_frame.grid(row=1, column=2, padx=10, pady=10, rowspan=2, sticky="nw")
+        # self.data_display_frame = tk.LabelFrame(root, text="Kết quả truyền dữ liệu từ ESP32", padx=10, pady=10)
+        # self.data_display_frame.grid(row=3, column=1, padx=10, pady=10, rowspan=2, sticky="nw")
 
-        self.data_display_text = tk.Text(self.data_display_frame, height=10, width=30)
-        self.data_display_text.grid(row=0, column=0)
+        # self.data_display_text = tk.Text(self.data_display_frame, height=10, width=30)
+        # self.data_display_text.grid(row=0, column=0)
         
         # Image path
         self.image_path = None
@@ -173,7 +173,7 @@ class CCCDApp:
         """Cập nhật danh sách cổng COM theo khoảng thời gian định kỳ."""
         while True:
             self.update_com_ports()
-            time.sleep(1)  # Cập nhật mỗi 10 giây
+            time.sleep(1)  # Cập nhật mỗi 1 giây
 
 #=======================================================================================
     def open_connection_thread(self):
@@ -309,8 +309,8 @@ class CCCDApp:
                 ocr_result = result.stdout
 
                 # Hiển thị kết quả OCR
-                self.card_info_text.delete(1.0, tk.END)
-                self.card_info_text.insert(tk.END, ocr_result)
+                # self.card_info_text.delete(1.0, tk.END)
+                # self.card_info_text.insert(tk.END, ocr_result)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to process image with OCR: {e}")
         else:
@@ -318,22 +318,42 @@ class CCCDApp:
 
 #=======================================================================================
     def send_combined_data(self):
-        """Send combined data from JSON file to ESP32 in a separate thread."""
-        self.update_status("Waiting")
+        """Send combined data and show a waiting dialog."""
+        # Hiển thị thông báo chờ
+        self.waiting_window = tk.Toplevel(self.root)
+        self.waiting_window.title("Thông Báo")
+        self.waiting_window.geometry("200x100")
+        
+        # Thiết lập cửa sổ thông báo không thể thao tác
+        self.waiting_window.grab_set()  # Ngăn không cho người dùng thao tác với cửa sổ chính
+        self.waiting_window.transient(self.root)  # Đặt cửa sổ thông báo trên cửa sổ chính
+        
+        # Thêm màu nền mờ
+        self.waiting_window.configure(bg='lightgray')
+        
+        self.waiting_label = tk.Label(self.waiting_window, text="Đang gửi dữ liệu, vui lòng đợi...", padx=10, pady=10, bg='lightgray')
+        self.waiting_label.pack(expand=True)
+        
+        # Khởi chạy thread gửi dữ liệu
         thread = threading.Thread(target=self._send_combined_data_thread)
         thread.start()
 
     def _send_combined_data_thread(self):
         """Thread function to send combined data and handle response."""
-        if self.ser and self.ser.is_open:
-            try:
+        try:
+            if self.ser and self.ser.is_open:
                 combined_data = self.read_and_combine_data()
                 self.send_data(combined_data)
                 self.process_esp32_response()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to send combined data: {e}")
-        else:
-            messagebox.showwarning("Warning", "Serial port is not open.")
+            else:
+                self.update_status("Fail")
+                self.show_failure_notification()
+            # Đóng thông báo chờ khi hoàn tất
+            self.waiting_window.destroy()
+        except Exception as e:
+            self.update_status("Fail")
+            self.show_failure_notification()
+            self.waiting_window.destroy()
 
     def read_and_combine_data(self):
         """Read data from JSON and combine it into a single string."""
@@ -351,7 +371,7 @@ class CCCDApp:
     def send_data(self, combined_data):
         """Send the combined data via serial connection."""
         self.ser.write(combined_data.encode() + b'\r')
-        self.data_display_text.insert(tk.END, f"Sent Combined Data: {combined_data}\n")
+    #     self.data_display_text.insert(tk.END, f"Sent Combined Data: {combined_data}\n")
 
     def process_esp32_response(self):
         """Process the response from ESP32."""
@@ -366,10 +386,13 @@ class CCCDApp:
                 self.handle_image_response(response)
             elif response.startswith('{') and response.endswith('}'):
                 self.handle_json_response(response)
+                self.waiting_window.destroy()  # Đóng thông báo chờ khi nhận dữ liệu
+                return  # Kết thúc vòng lặp
             else:
                 self.handle_other_responses(response)
             
-            self.data_display_text.insert(tk.END, f"Received: {response}\n")
+            # self.data_display_text.insert(tk.END, f"Received: {response}\n")
+
 
     def handle_image_response(self, response):
         """Handle image data response."""
@@ -428,34 +451,63 @@ class CCCDApp:
 
 #=======================================================================================    
     def export_form(self):
-        if self.check1_var.get():
-            # Gather data from entries
-            data = {
-                "Họ và tên": self.entries[0].get(),
-                "Số CCCD": self.entries[1].get(),
-                "Ngày cấp": self.entries[2].get(),
-                "Ngày hết hạn": self.entries[3].get(),
-                "Ngày sinh": self.entries[4].get(),
-                "Giới tính": self.entries[5].get(),
-                "Quốc tịch": self.entries[6].get(),
-                "Dân tộc": self.entries[7].get(),
-                "Tôn giáo": self.entries[8].get(),
-                "Quê quán": self.entries[9].get(),
-                "Thường trú": self.entries[10].get(),
-                "Nhận dạng": self.entries[11].get(),
-                "Họ tên cha": self.entries[12].get(),
-                "Họ tên mẹ": self.entries[13].get()
-            }
+        """Export form and convert to PDF."""
+        # Hiển thị thông báo chờ
+        self.waiting_window = tk.Toplevel(self.root)
+        self.waiting_window.title("Thông Báo")
+        self.waiting_window.geometry("200x100")
+        
+        # Thiết lập cửa sổ thông báo không thể thao tác
+        self.waiting_window.grab_set()  # Ngăn không cho người dùng thao tác với cửa sổ chính
+        self.waiting_window.transient(self.root)  # Đặt cửa sổ thông báo trên cửa sổ chính
+        
+        # Thêm màu nền mờ
+        self.waiting_window.configure(bg='lightgray')
+        
+        self.waiting_label = tk.Label(self.waiting_window, text="Đang xuất dữ liệu, vui lòng đợi...", padx=10, pady=10, bg='lightgray')
+        self.waiting_label.pack(expand=True)
+        
+        # Khởi chạy thread xuất dữ liệu
+        thread = threading.Thread(target=self._export_form_thread)
+        thread.start()
 
-            template_path = 'doc/syll.docx'
-            output_path = 'doc/syll_filled.docx'
-            fill(template_path, output_path, data)
-            
-            messagebox.showinfo("Info", f"Form exported and converted to PDF at {output_path}")
-        elif self.check2_var.get():
-            messagebox.showwarning("Warning", "Please select a form to export.")
-        else:
-            messagebox.showwarning("Warning", "Please select a form to export.")
+    def _export_form_thread(self):
+        """Thread function to export form and handle response."""
+        try:
+            if self.check1_var.get():
+                # Gather data from entries
+                data = {
+                    "Họ và tên": self.entries[0].get(),
+                    "Số CCCD": self.entries[1].get(),
+                    "Ngày cấp": self.entries[2].get(),
+                    "Ngày hết hạn": self.entries[3].get(),
+                    "Ngày sinh": self.entries[4].get(),
+                    "Giới tính": self.entries[5].get(),
+                    "Quốc tịch": self.entries[6].get(),
+                    "Dân tộc": self.entries[7].get(),
+                    "Tôn giáo": self.entries[8].get(),
+                    "Quê quán": self.entries[9].get(),
+                    "Thường trú": self.entries[10].get(),
+                    "Nhận dạng": self.entries[11].get(),
+                    "Họ tên cha": self.entries[12].get(),
+                    "Họ tên mẹ": self.entries[13].get()
+                }
+
+                template_path = 'doc/syll.docx'
+                output_dir = 'doc/'  # Thư mục lưu trữ các file đầu ra
+
+                # Sử dụng hàm fill đã được cập nhật để tạo và chuyển đổi tài liệu Word sang PDF
+                pdf_path = fill(template_path, output_dir, data)
+                
+                # Hiển thị thông báo hoàn thành
+                self.waiting_window.destroy()
+                messagebox.showinfo("Info", f"Form exported and converted to PDF at {pdf_path}")
+            else:
+                messagebox.showwarning("Warning", "Please select a form to export.")
+                self.waiting_window.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export form: {e}")
+            self.waiting_window.destroy()
 
 #=======================================================================================  
     def clear_files(self):
@@ -469,15 +521,6 @@ class CCCDApp:
         json_path = 'icao/result.json'
         if os.path.exists(json_path):
             os.remove(json_path)
-        
-        # Xóa file text
-        text_path = 'icao/result.txt'
-        if os.path.exists(text_path):
-            os.remove(text_path)
-
-        text_path = 'doc/syll_filled.docx'
-        if os.path.exists(text_path):
-            os.remove(text_path)
 
 #=======================================================================================      
     def on_closing(self):
