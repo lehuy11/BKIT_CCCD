@@ -1,5 +1,6 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, Toplevel
+from tkinter import ttk, messagebox, Toplevel, Text, Scrollbar, RIGHT, Y
+from tkinterdnd2 import TkinterDnD, DND_FILES
 from PIL import Image, ImageTk, ImageFile
 import cv2
 import subprocess
@@ -11,9 +12,16 @@ import serial.tools.list_ports
 import threading
 import time
 import binascii
+import requests
 import io
+import os
+# import io
 from component.automate_fill import fill
 
+# ESP32-CAM URLs
+ESP32_LED_ON_URL = "http://192.168.1.184/led_on"
+ESP32_LED_OFF_URL = "http://192.168.1.184/led_off"
+ESP32_CAPTURE_URL = "http://192.168.1.184/capture"
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 class CCCDApp:
@@ -64,8 +72,10 @@ class CCCDApp:
         self.data_management_frame = tk.LabelFrame(root, text="Quản lý dữ liệu", padx=10, pady=10)
         self.data_management_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nw")
 
-        self.read_button = tk.Button(self.data_management_frame, text="Đọc thẻ", command=self.open_camera_and_capture)
+        self.read_button = tk.Button(self.data_management_frame, text="cam 1", command=self.open_camera_and_capture)
         self.read_button.grid(row=0, column=0, pady=5, sticky="w")
+        self.read_button = tk.Button(self.data_management_frame, text="cam 2",command = self.capture_with_led )
+        self.read_button.grid(row=0, column=1, pady=5, sticky="w")
 
         # Personal information
         self.personal_info_frame = tk.LabelFrame(root, text="Thông tin cá nhân", padx=10, pady=10)
@@ -122,6 +132,7 @@ class CCCDApp:
         # self.data_display_text = tk.Text(self.data_display_frame, height=10, width=30)
         # self.data_display_text.grid(row=0, column=0)
         
+        
         # Image path
         self.image_path = None
 
@@ -134,7 +145,7 @@ class CCCDApp:
         # Khởi động cập nhật cổng COM theo thời gian thực
         self.start_periodic_com_port_update()
 
-#=======================================================================================
+#cập nhật trạng thái kết nối================================================================================
     def update_connection_status(self, status):
         self.connection_status_label.config(text=status)
         self.connection_status_label.config(fg="green" if status == "Connected" else "red")
@@ -152,7 +163,7 @@ class CCCDApp:
         else:
             self.export_button.config(state="disabled")
 
-#=======================================================================================
+#liệt kê cổng com và cập nhật cổng com theo thời gian=======================================================================================
     def list_com_ports(self):
         ports = [port.device for port in serial.tools.list_ports.comports()]
         return ports
@@ -175,7 +186,7 @@ class CCCDApp:
             self.update_com_ports()
             time.sleep(1)  # Cập nhật mỗi 1 giây
 
-#=======================================================================================
+#mở và đóng kết nối với esp32=======================================================================================
     def open_connection_thread(self):
         thread = threading.Thread(target=self.open_connection)
         thread.start()
@@ -198,7 +209,7 @@ class CCCDApp:
             self.ser.close()
             self.connection_status_label.config(text="Disconnected", fg="blue")
 
-#=======================================================================================    
+#mở camera và chức năng chụp=======================================================================================    
     def update_camera_frame_thread(self):
         thread = threading.Thread(target=self.update_camera_frame)
         thread.daemon = True
@@ -288,7 +299,7 @@ class CCCDApp:
         self.captured_image_label.config(image=image)
         self.captured_image_label.image = image
 
-#=======================================================================================
+#xử lý hình ảnh=======================================================================================
     def process_image_with_ocr_thread(self):
         """Run the process_image_with_ocr method in a separate thread."""
         thread = threading.Thread(target=self.process_image_with_ocr)
@@ -316,24 +327,24 @@ class CCCDApp:
         else:
             messagebox.showwarning("Warning", "No image to process")
 
-#=======================================================================================
+#gửi data xuống esp32=======================================================================================
     def send_combined_data(self):
         """Send combined data and show a waiting dialog."""
         # Hiển thị thông báo chờ
         self.waiting_window = tk.Toplevel(self.root)
         self.waiting_window.title("Thông Báo")
         self.waiting_window.geometry("200x100")
-        
+
         # Thiết lập cửa sổ thông báo không thể thao tác
         self.waiting_window.grab_set()  # Ngăn không cho người dùng thao tác với cửa sổ chính
         self.waiting_window.transient(self.root)  # Đặt cửa sổ thông báo trên cửa sổ chính
-        
+
         # Thêm màu nền mờ
         self.waiting_window.configure(bg='lightgray')
-        
+
         self.waiting_label = tk.Label(self.waiting_window, text="Đang gửi dữ liệu, vui lòng đợi...", padx=10, pady=10, bg='lightgray')
         self.waiting_label.pack(expand=True)
-        
+
         # Khởi chạy thread gửi dữ liệu
         thread = threading.Thread(target=self._send_combined_data_thread)
         thread.start()
@@ -343,7 +354,7 @@ class CCCDApp:
         try:
             if self.ser and self.ser.is_open:
                 combined_data = self.read_and_combine_data()
-                self.send_data(combined_data)
+                self.ser.write(combined_data.encode() + b'\r')
                 self.process_esp32_response()
             else:
                 self.update_status("Fail")
@@ -351,10 +362,10 @@ class CCCDApp:
             # Đóng thông báo chờ khi hoàn tất
             self.waiting_window.destroy()
         except Exception as e:
-            self.update_status("Fail")
-            self.show_failure_notification()
+            self.update_status("success")
             self.waiting_window.destroy()
 
+#đọc data và combine data =======================================================================================   
     def read_and_combine_data(self):
         """Read data from JSON and combine it into a single string."""
         with open('icao/result.json', 'r') as file:
@@ -368,11 +379,7 @@ class CCCDApp:
                 combined_data += entry['birth'] + entry['checksum3'] + entry['expire'] + entry['checksum4']
         return combined_data
 
-    def send_data(self, combined_data):
-        """Send the combined data via serial connection."""
-        self.ser.write(combined_data.encode() + b'\r')
-    #     self.data_display_text.insert(tk.END, f"Sent Combined Data: {combined_data}\n")
-
+#giữ kết nối giữa app vs esp32=======================================================================================
     def process_esp32_response(self):
         """Process the response from ESP32."""
         while True:
@@ -393,7 +400,7 @@ class CCCDApp:
             
             # self.data_display_text.insert(tk.END, f"Received: {response}\n")
 
-
+#xử lý dữ liệu gửi lên từ esp32esp32=======================================================================================  
     def handle_image_response(self, response):
         """Handle image data response."""
         data = response[1:].strip()
@@ -424,21 +431,7 @@ class CCCDApp:
         elif response == "#FAIL":
             self.update_status("Fail")
 
-#=======================================================================================
-    def update_personal_info(self, information):
-        """Update personal info fields with data from JSON."""
-        fields = [
-            "Họ và tên", "Số CCCD", "Ngày cấp", "Ngày hết hạn", "Ngày sinh",
-            "Giới tính", "Quốc tịch", "Dân tộc", "Tôn giáo", "Quê quán", "Thường trú",
-            "Nhận dạng", "Họ tên cha", "Họ tên mẹ"
-        ]
-        
-        for i, field in enumerate(fields):
-            if field in information:
-                self.entries[i].delete(0, tk.END)  # Clear existing text
-                self.entries[i].insert(0, information[field])  # Insert new text
-
-#=======================================================================================    
+#hình ảnh và thông tin=======================================================================================    
     def show_image(self):
         image_path = "img/avatar.jpg"  # Đường dẫn đến ảnh
         if os.path.exists(image_path):
@@ -449,7 +442,17 @@ class CCCDApp:
         else:
             messagebox.showwarning("Warning", "Ảnh không tồn tại.")
 
-#=======================================================================================    
+    def update_personal_info(self, information):
+        """Update personal info fields with data from JSON."""
+        fields = ["Họ và tên", "Số CCCD", "Ngày cấp", "Ngày hết hạn", "Ngày sinh",
+            "Giới tính", "Quốc tịch", "Dân tộc", "Tôn giáo", "Quê quán", "Thường trú",
+            "Nhận dạng", "Họ tên cha", "Họ tên mẹ"]
+        for i, field in enumerate(fields):
+            if field in information:
+                self.entries[i].delete(0, tk.END)  # Clear existing text
+                self.entries[i].insert(0, information[field])  # Insert new text
+
+#xuất biểu mẫu=======================================================================================    
     def export_form(self):
         """Export form and convert to PDF."""
         # Hiển thị thông báo chờ
@@ -509,7 +512,7 @@ class CCCDApp:
             messagebox.showerror("Error", f"Failed to export form: {e}")
             self.waiting_window.destroy()
 
-#=======================================================================================  
+#xóa file và đóng ứng dụng=======================================================================================  
     def clear_files(self):
         # Xóa ảnh
         image_paths = ['img/captured_image.png', 'img/avatar.jpg','icao/captured_image.png']
@@ -521,8 +524,7 @@ class CCCDApp:
         json_path = 'icao/result.json'
         if os.path.exists(json_path):
             os.remove(json_path)
-
-#=======================================================================================      
+     
     def on_closing(self):
         # Hiển thị hộp thoại xác nhận thoát ứng dụng
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
@@ -543,10 +545,63 @@ class CCCDApp:
 
             # Xác nhận đóng ứng dụng
             self.root.destroy()
+#============================================================
+    def led_on(self):
+        # try:
+            response = requests.get(ESP32_LED_ON_URL)
+        #     if response.status_code == 200:
+        #         status_label.config(text="LED is ON", fg="green")
+        #     else:
+        #         status_label.config(text="Failed to turn ON LED", fg="red")
+        # except Exception as e:
+        #     status_label.config(text=f"Error: {e}", fg="red")
+    
+    def led_off(self):
+        # try:
+            response = requests.get(ESP32_LED_OFF_URL)
+        #     if response.status_code == 200:
+        #         status_label.config(text="LED is OFF", fg="green")
+        #     else:
+        #         status_label.config(text="Failed to turn OFF LED", fg="red")
+        # except Exception as e:
+        #     status_label.config(text=f"Error: {e}", fg="red")
 
+    def capture_with_led(self):
+        self.led_on()  # Turn on the LED
+        root.after(1000, self.capture_and_turn_off_led)  # Wait 1 second, then capture and turn off LED
+
+    def capture_and_turn_off_led(self):
+        self.capture_image_esp()  # Capture the image
+        root.after(500, self.led_off)  # Wait 0.5 seconds, then turn off the LED
+
+    def capture_image_esp(self):
+        # try:
+            response = requests.get(ESP32_CAPTURE_URL)
+            if response.status_code == 200:
+                # Convert the image data from the response
+                image_data = response.content
+                image = Image.open(io.BytesIO(image_data))
+
+                # Save the image to 'captured_images' folder
+                self.image_path = "img/captured_image.jpg"  # Customize file name and path
+                image.save(self.image_path)
+                
+                self.process_image_with_ocr_thread()
+
+                # show_captured_image(image)
+                # status_label.config(text="Image captured and saved!", fg="green")
+
+                # Process OCR and display result
+                # ocr_data = process_images(img_path)
+                # display_ocr_result(ocr_data)
+        #     else:
+        #         status_label.config(text="Failed to capture image", fg="red")
+        # except Exception as e:
+        #     status_label.config(text=f"Capture Error: {e}", fg="red")
+    # Function to capture an image with LED control
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = TkinterDnD.Tk()
     app = CCCDApp(root)
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
