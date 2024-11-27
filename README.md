@@ -6,3 +6,5 @@ PaddlePaddle >= 2.1.2
 Python 3.7
 CUDA 10.1 / CUDA 10.2
 cuDNN 7.6
+
+The cccd directory is the directory containing the code used to decode cccd
